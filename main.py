@@ -1,4 +1,5 @@
 #!/bin/python
+#-*- coding: utf-8 -*-
 
 from datetime import date
 import tornado.escape
@@ -31,8 +32,10 @@ class Application(tornado.web.Application):
             (r"/mines/([+-]?[0-9]+(?:[.]?[0-9]*))/([+-]?[0-9]+(?:[.]?[0-9]*))", MinesHandler),
             (r"/mines/([+-]?[0-9]+(?:[.]?[0-9]*))/([+-]?[0-9]+(?:[.]?[0-9]*))/(.*)", MinesHandler),
             (r"/mines/([0-9]+)/(.*)", MinesHandler),
+            (r"/user/([0-9]+)/(.*)", UserHandler),
+            (r"/inven/([0-9]+)/(.*)", InvenHandler),
         ]
-        settings = dict(debug=False,)
+        settings = dict(debug=True,)
         super(Application, self).__init__(handlers, **settings)
         # Have one global connection to the blog DB across all handlers
         self.db = torndb.Connection(
@@ -48,7 +51,8 @@ class VersionHandler(BaseHandler):
     def get(self):
         response = { 'version': '0.0.1',
                      'last_build':  date.today().isoformat(),
-                     'server configure': options.myoption}
+                     'server configure': options.myoption,
+                     'a': a}
         self.write(response)
  
 class GetGameByIdHandler(BaseHandler):
@@ -66,8 +70,13 @@ class MinesHandler(BaseHandler):
     def get(self, lat, lon):
         print str(float(lat))
         print str(float(lon))
-        self.write(json.dumps(self.db.query("call rec_geo(%s, %s, 1000);",
-            str(float(lat)), str(float(lon)))))
+        arr = self.get_argument("around", default="1000", strip=True)
+        try:
+            arr = int(arr)
+	except:
+            arr = 1000
+        self.write(json.dumps(self.db.query("call circle_geo(%s, %s, %s);",
+            str(float(lat)), str(float(lon)), str(arr))))
     def post(self, lat, lon, user):
         print lat, lon, user 
         try:
@@ -76,7 +85,8 @@ class MinesHandler(BaseHandler):
             tmp = self.db.insert("insert into mine (lat, lon, user) values (%s, %s, %s)",
                 str(float(lat)), str(float(lon)), str(int(user)))
             print tmp
-            self.write({"state":"OK", "id":tmp})
+            self.write({"state":"OK", "id":tmp,"mineid":tmp})
+            #id is under support issue 
         except:
             self.write({"state":"FAIL"})
     def delete(self, idmine, user):
@@ -109,13 +119,49 @@ class MinesHandler(BaseHandler):
             print e
             self.write({"state":"FAIL"})
 
+class UserHandler(BaseHandler):
+    def get(self, iduser, user_auth):
+        try:
+            "print ff"
+            user = self.db.get("select iduser from user where id = %s", user_auth)["iduser"]
+            nam = self.db.get("select user.name, user.picture, user.team, team.name as team_name from user, team where user.iduser = %s and user.team = team.idteam", int(iduser))['team_name']
+            print nam
+            self.write((json.dumps(self.db.get("select user.name, user.picture, user.team, team.name as team_name from user, team where user.iduser = %s and user.team = team.idteam", int(iduser)))))
+        except Exception as e:
+            print e
+            self.write({"state":"FAIL"})
+
+class InvenHandler(BaseHandler):
+    def is_right_user(self, iduser, user_auth):
+        try:
+            user = self.db.get("select iduser from user where id = %s", user_auth)["iduser"]
+            if (int(user) is not 0) and (int(iduser) is not int(user)):
+                raise Exception
+            return True
+        except Exception as e:
+            return False
+
+    def get(self, iduser, user_auth):
+        try:
+            if(self.is_right_user(iduser, user_auth)):
+                self.write(json.dumps(self.db.query("select * from inventory where iduser = %s",iduser)))
+            else:
+                self.write({"state":"WRONG_ID"})
+        except Exception as e:
+            print e
+            self.write({"state":"FAIL"})
+
+    
+
+
 if __name__ == "__main__":
     tornado.options.parse_config_file("server.conf")
     #application.listen(8888)
     http_server = tornado.httpserver.HTTPServer(Application())
-    http_server.bind(8888)
-    http_server.start(8)    
-    #IOLoop.current().start()
+    #http_server.bind(8888) #un # in real work
+    http_server.listen(8888) # # in real work
+    #http_server.start(8)   #un # in real work
+    #tornado.ioloop.IOLoop.current().start()
     #tornado.ioloop.IOLoop.instance().start()
     tornado.ioloop.IOLoop.current().start()
 
