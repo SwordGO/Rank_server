@@ -29,11 +29,13 @@ class Application(tornado.web.Application):
             (r"/getgamebyid/([0-9]+)", GetGameByIdHandler),
             (r"/version", VersionHandler),
             (r"/mines", GetMinesHandler_all),
+            (r"/mines/([0-9]+)", MinesIDHandler ),
             (r"/mines/([+-]?[0-9]+(?:[.]?[0-9]*))/([+-]?[0-9]+(?:[.]?[0-9]*))", MinesHandler),
             (r"/mines/([+-]?[0-9]+(?:[.]?[0-9]*))/([+-]?[0-9]+(?:[.]?[0-9]*))/(.*)", MinesHandler),
             (r"/mines/([0-9]+)/(.*)", MinesHandler),
             (r"/user/([0-9]+)/(.*)", UserHandler),
-            (r"/inven/([0-9]+)/(.*)", InvenHandler),
+            (r"/inven/([0-9]+)/(((?!/).)*)", InvenHandler),
+            (r"/inven/([0-9]+)/([a-z]+)/(.*)", InvenHandler),
         ]
         settings = dict(debug=True,)
         super(Application, self).__init__(handlers, **settings)
@@ -65,7 +67,20 @@ class GetGameByIdHandler(BaseHandler):
 class GetMinesHandler_all(BaseHandler):
     def get(self):
         self.write(json.dumps(self.db.query("select * from mine;")))   
- 
+
+class MinesIDHandler(BaseHandler):
+    def is_right_user(self, iduser, user_auth):
+        try:
+            user = self.db.get("select iduser from user where id = %s", user_auth)["iduser"]
+            return True
+        except Exception as e:
+            return False
+
+    def get(self, idmine):
+       try:
+           self.write(json.dumps(self.db.get("select * from mine where idmine = %s", str(idmine))))  
+       except Exception as e:
+           self.write({"state":"FAIL"})
 class MinesHandler(BaseHandler):
     def get(self, lat, lon):
         print str(float(lat))
@@ -85,7 +100,7 @@ class MinesHandler(BaseHandler):
             tmp = self.db.insert("insert into mine (lat, lon, user) values (%s, %s, %s)",
                 str(float(lat)), str(float(lon)), str(int(user)))
             print tmp
-            self.write({"state":"OK", "id":tmp,"mineid":tmp})
+            self.write({"state":"OK", "id":tmp,"idmine":tmp})
             #id is under support issue 
         except:
             self.write({"state":"FAIL"})
@@ -137,11 +152,12 @@ class InvenHandler(BaseHandler):
             user = self.db.get("select iduser from user where id = %s", user_auth)["iduser"]
             if (int(user) is not 0) and (int(iduser) is not int(user)):
                 raise Exception
-            return True
+            return int(user)
         except Exception as e:
             return False
 
-    def get(self, iduser, user_auth):
+    def get(self, iduser, user_auth,a):
+        print iduser, user_auth, a
         try:
             if(self.is_right_user(iduser, user_auth)):
                 self.write(json.dumps(self.db.query("select * from inventory where iduser = %s",iduser)))
@@ -151,7 +167,20 @@ class InvenHandler(BaseHandler):
             print e
             self.write({"state":"FAIL"})
 
-    
+    def put(self, iduser, ore, user_auth):
+        print iduser,ore, user_auth
+        try:
+            iduser = self.is_right_user(iduser, user_auth)
+            if(iduser):
+                many = self.get_argument("num", default="0", strip=True)
+                #update mine set HP = HP - %s where idmine = %s",str(demage) ,str(int(idmine))
+                self.db.update("update inventory set %(ore)s = %(ore)s + (%(many)s) where iduser = %(iduser)s"%locals())
+                self.write({"state":"OK", "ore":ore, "many":many})
+            else:
+                self.write({"state":"WRONGID"})
+        except Exception as e:
+            print e
+            self.write({"state":"FAIL"}) 
 
 
 if __name__ == "__main__":
